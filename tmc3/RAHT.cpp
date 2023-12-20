@@ -724,6 +724,10 @@ uraht_process(
   int trainZeros = 0;
   // NB: rootLevel = ceil((levelHfPos.size() - 1)/3.0)
   int rootLevel = (levelHfPos.size() + 1) / 3;
+
+  //int not_enableIntra_node = 0;
+  //int not_enableIntra_node_mode_is_inter = 0;
+
   for (int level = levelHfPos.size() - 1, isFirst = 1; level > 0; /*nop*/) {
     int numNodes = weightsHf.size() - levelHfPos[level];
     weightsLf.resize(weightsLf.size() + numNodes);
@@ -1000,6 +1004,16 @@ uraht_process(
             weights, attrRecParentUsIt, transformBuf, modes, qpLayer, nodeQp, upperInferMode)
         : Mode::Null;
 
+	  /*if (coder.isInterEnabled()&& (nodeCnt > 1)) {
+        if (!upperInferMode && !(predCtxLevel < 0)) {
+		  if (!enableIntraPrediction) {
+            not_enableIntra_node++;
+			if(predMode == Mode::Inter)
+			  not_enableIntra_node_mode_is_inter++;
+		  }		
+        }
+      }*/
+
       for (auto weightsChild = weightsParentIt->firstChild;
            weightsChild < weightsParentIt->lastChild; weightsChild++) {
         if (int(predMode) >= Mode::Inter)
@@ -1201,7 +1215,9 @@ uraht_process(
     // preserve current weights/positions for later search
     weightsParent = weightsLf;
   }
-
+  /*std::cout << "中层帧内不开node数为：" << not_enableIntra_node
+            << ". 此时rdo为inter数为：" << not_enableIntra_node_mode_is_inter
+            << std::endl;*/
   // process duplicate points at level 0
   std::swap(attrRec, attrRecParent);
   auto attrRecParentIt = attrRecParent.cbegin();
@@ -1385,20 +1401,35 @@ regionAdaptiveHierarchicalTransform(
           enableInterPrediction, nodeCnt, parentMode, neighborsMode, numAttrs,
           weights, attrRecParent);
 
-        if (inferredPredMode == Mode::Null)
-          return Mode::Null;
         if (predCtxLevel < 0)
           return inferredPredMode;
+
+        std::vector<Mode> modes_in_current_node = modes;
+        VecAttr transformBuf_in_current_node = transformBuf;
+
+        if (encoder.isInterEnabled()) {
+          if (!enableIntraPrediction) {
+            modes_in_current_node.resize(2);
+            transformBuf_in_current_node.resize(2 * numAttrs);
+          }
+        } else {
+          if (!enableIntraPrediction)
+            return Mode::Null;
+        }
 
         encoder.getEntropy(predCtxMode, predCtxLevel);
         Mode predMode;
         if(rahtPredParams.integer_haar_enable_flag) {
           predMode = attr::choseMode<HaarKernel>(
-            encoder, transformBuf, modes, weights, numAttrs, qpset, qpLayer,
+            encoder, transformBuf_in_current_node, modes_in_current_node,
+            weights, numAttrs,
+            qpset, qpLayer,
             nodeQp);
         } else {
           predMode = attr::choseMode<RahtKernel>(
-            encoder, transformBuf, modes, weights, numAttrs, qpset, qpLayer,
+            encoder, transformBuf_in_current_node, modes_in_current_node,
+            weights, numAttrs,
+            qpset, qpLayer,
             nodeQp);
         }
         encoder.encode(predCtxMode, predCtxLevel, predMode);
@@ -1466,10 +1497,14 @@ regionAdaptiveHierarchicalInverseTransform(
           enableInterPrediction, nodeCnt, parentMode, neighborsMode, numAttrs,
           weights, attrRecParent);
 
-        if (inferredPredMode == Mode::Null)
-          return Mode::Null;
         if (predCtxLevel < 0)
           return inferredPredMode;
+
+        if (!decoder.isInterEnabled()) {
+          if (!enableIntraPrediction)
+            return Mode::Null;
+        }
+
         return decoder.decode(predCtxMode, predCtxLevel);
       }
       return Mode::Null;
