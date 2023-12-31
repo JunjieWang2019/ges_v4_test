@@ -46,7 +46,7 @@
 #include "PCCTMC3Common.h"
 #include "PCCMisc.h"
 #include "attr_tools.h"
-
+std::ofstream outfile("enc.txt", std::ios::app);
 using pcc::attr::Mode;
 
 namespace pcc {
@@ -727,6 +727,14 @@ uraht_process(
 
   //int not_enableIntra_node = 0;
   //int not_enableIntra_node_mode_is_inter = 0;
+  int inter_node = 0;
+  int intra_node = 0;
+  int null_node = 0;
+  std::vector<std::vector<int>> ctx_Mode(108);
+  for (int i = 0; i < ctx_Mode.size(); i++)  
+  {
+    ctx_Mode[i].resize(3);
+  }
 
   for (int level = levelHfPos.size() - 1, isFirst = 1; level > 0; /*nop*/) {
     int numNodes = weightsHf.size() - levelHfPos[level];
@@ -1004,15 +1012,32 @@ uraht_process(
 			weights, attrRecParentUsIt, transformBuf, modes, qpLayer, nodeQp, upperInferMode)
         : Mode::Null;
 
-      /*if (coder.isInterEnabled()&& (nodeCnt > 1)) {
+      if (coder.isInterEnabled()&& (nodeCnt > 1)) {
         if (!upperInferMode && !(predCtxLevel < 0)) {
-		  if (!enableIntraPrediction) {
-            not_enableIntra_node++;
-			if(predMode == Mode::Inter)
-			  not_enableIntra_node_mode_is_inter++;
+          if (enableIntraPrediction || enableInterPrediction) {
+            int predCtxMode;
+            auto inferredPredMode = attr::getInferredMode(
+              predCtxMode, enableIntraPrediction, enableInterPrediction,
+              nodeCnt, weightsParentIt->mode, neighborsMode, numAttrs, weights,
+              attrRecParentUsIt);
+
+			if (predMode == Mode::Inter) {
+              inter_node++;
+			  ctx_Mode[predCtxMode][0]++;
+            }
+			else if (predMode == Mode::Intra) {
+			  intra_node++;
+              ctx_Mode[predCtxMode][1]++;
+			} 
+            else {
+              null_node++;
+			  ctx_Mode[predCtxMode][2]++;
+            }
+              
+
 		  }		
         }
-      }*/
+      }
 
       for (auto weightsChild = weightsParentIt->firstChild;
            weightsChild < weightsParentIt->lastChild; weightsChild++) {
@@ -1214,9 +1239,19 @@ uraht_process(
     // preserve current weights/positions for later search
     weightsParent = weightsLf;
   }
-  /*std::cout << "中层帧内不开node数为：" << not_enableIntra_node
-            << ". 此时rdo为inter数为：" << not_enableIntra_node_mode_is_inter
-            << std::endl;*/
+  if (coder.isInterEnabled()) {
+    outfile << "中层   inter node数为：" << inter_node
+              << ".    intra node数为：" << intra_node 
+		      << ".    null node数为：" << null_node
+		      << std::endl;
+
+	for (int i = 0; i < 108; i++)
+      outfile << "ctxMode：" << i << "    inter node：" << ctx_Mode[i][0]
+              << ".    intra node：" << ctx_Mode[i][1] << ".    null node："
+              << ctx_Mode[i][2] << std::endl;
+
+  }
+  
   // process duplicate points at level 0
   std::swap(attrRec, attrRecParent);
   auto attrRecParentIt = attrRecParent.cbegin();
